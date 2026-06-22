@@ -72,16 +72,34 @@ async function mapWithConcurrency<T, R>(
   return results
 }
 
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  ms = 8000,
+): Promise<Response> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), ms)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 export async function fetchNewsPath(): Promise<NewsPathData> {
   const isVercel = Boolean(process.env.VERCEL)
   const rssUrl = 'https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en'
-  const rssRes = await fetch(rssUrl, {
-    headers: {
-      'User-Agent':
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      Accept: 'application/rss+xml, application/xml, text/xml, */*',
+  const rssRes = await fetchWithTimeout(
+    rssUrl,
+    {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        Accept: 'application/rss+xml, application/xml, text/xml, */*',
+      },
     },
-  })
+    isVercel ? 8000 : 15000,
+  )
 
   if (!rssRes.ok) throw new Error(`RSS fetch failed: ${rssRes.status}`)
 

@@ -1,21 +1,22 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { fetchNewsPath } from '../server/fetchNewsPath.js'
 
 export const config = {
   maxDuration: 60,
 }
 
-export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== 'GET') {
-    return new Response('Method Not Allowed', { status: 405 })
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'GET') {
+    res.status(405).json({ error: 'Method Not Allowed' })
+    return
   }
 
   try {
     const data = await fetchNewsPath()
-    return Response.json(data)
+    res.status(200).json(data)
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    )
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Unknown error',
+    })
   }
 }
