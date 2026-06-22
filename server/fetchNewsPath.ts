@@ -1,12 +1,12 @@
 import {
   getBingImageCandidates,
   isLikelyProperNoun,
-  loremFallback,
   picsumFallback,
   shouldRejectImage,
   stableHash,
 } from './imageSearch.js'
 import { pickWorkingUrlsParallel } from './imageProbe.js'
+import { tokenizeHeadlineForSearch } from './headlineTokens.js'
 import { fetchWithTimeout } from './fetchWithTimeout.js'
 
 export interface HeadlineEntry {
@@ -44,7 +44,7 @@ function decodeHtmlEntities(str: string): string {
 }
 
 function splitHeadlineWords(headline: string): string[] {
-  return headline.split(/\s+/).filter(Boolean)
+  return tokenizeHeadlineForSearch(headline)
 }
 
 function wordKey(word: string): string {
@@ -126,11 +126,7 @@ export async function fetchNewsPath(): Promise<NewsPathData> {
     if (!builder) {
       builder = (async () => {
         const maxValid = poolSizeForWord(key)
-        const fallbacks = [
-          loremFallback(word),
-          picsumFallback(word),
-          loremFallback(`${word}-alt`),
-        ]
+        const fallbacks = [picsumFallback(word)]
 
         const bingCandidates = (
           await getBingImageCandidates(word, { headline })
@@ -178,7 +174,7 @@ export async function fetchNewsPath(): Promise<NewsPathData> {
     const pool = await ensurePool(word, key, headline)
     const bingCandidates = bingCandidatesByWord.get(key) ?? []
     const primary =
-      pool[occurrence % pool.length] ?? pool[0] ?? bingCandidates[0] ?? loremFallback(word)
+      pool[occurrence % pool.length] ?? pool[0] ?? bingCandidates[0] ?? picsumFallback(word)
 
     if (isBingUrl(primary, bingCandidates)) bingHits++
 

@@ -27,7 +27,7 @@ async function fetchNewsPath(): Promise<NewsPathData> {
 }
 
 export default function App() {
-  const { data, isLoading, isFetching } = useQuery<NewsPathData>({
+  const { data, isLoading, isFetching, isError, error } = useQuery<NewsPathData>({
     queryKey: ['news-path'],
     queryFn: fetchNewsPath,
     staleTime: 5 * 60 * 1000,
@@ -88,6 +88,19 @@ export default function App() {
     }
   }, [headlineIdx, data?.headlines.length, words.length])
 
+  if (isError && !data) {
+    return (
+      <div className="frame-shell">
+        <div className="frame flex items-center justify-center px-6">
+          <p className="text-center text-sm text-white/70">
+            Couldn&apos;t load headlines.
+            {error instanceof Error ? ` ${error.message}` : ''}
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   if ((isLoading || isFetching) && !data) {
     return (
       <div className="frame-shell">
@@ -98,10 +111,12 @@ export default function App() {
     )
   }
 
-  if (isLoading || !headline || !displaySrc) {
+  if (!headline || !displaySrc) {
     return (
       <div className="frame-shell">
-        <div className="frame" />
+        <div className="frame flex items-center justify-center">
+          <p className="animate-pulse text-sm text-white/50">Loading headlines…</p>
+        </div>
       </div>
     )
   }

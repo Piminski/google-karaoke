@@ -1,4 +1,77 @@
 import { fetchWithTimeout } from './fetchWithTimeout.js'
+import { isTitleCaseToken } from './headlineTokens.js'
+
+const WIKIPEDIA_HEADERS = {
+  'User-Agent': 'GoogleKaraoke/1.0 (https://google-karaoke.vercel.app; news karaoke demo)',
+  Accept: 'application/json',
+} as const
+
+/** Headline words often capitalized but not names/places — skip proper-noun image path. */
+const COMMON_CAPITALIZED_HEADLINE_WORDS = new Set([
+  'sanctions',
+  'oil',
+  'peace',
+  'deal',
+  'shift',
+  'talks',
+  'war',
+  'news',
+  'final',
+  'huge',
+  'sales',
+  'amid',
+  'waives',
+  'authorizes',
+  'brings',
+  'chief',
+  'senior',
+  'former',
+  'current',
+  'global',
+  'local',
+  'national',
+  'international',
+  'military',
+  'economic',
+  'political',
+  'official',
+  'secret',
+  'critical',
+  'massive',
+  'major',
+  'minor',
+  'possible',
+  'likely',
+  'urgent',
+  'serious',
+  'severe',
+  'strike',
+  'attack',
+  'crisis',
+  'reform',
+  'policy',
+  'summit',
+  'market',
+  'price',
+  'rate',
+  'trade',
+  'budget',
+  'spending',
+  'growth',
+  'report',
+  'study',
+  'claim',
+  'trial',
+  'court',
+  'party',
+  'union',
+  'leader',
+  'support',
+  'block',
+  'ban',
+  'lift',
+  'ease',
+])
 
 const BING_HEADERS = {
   'User-Agent':
@@ -75,12 +148,154 @@ const STOCK_URL_HINTS = [
   'commercial-photo',
 ]
 
-/** Bing site: exclusions appended to every image query. */
-const STOCK_SITE_EXCLUSIONS =
-  '-site:shutterstock.com -site:gettyimages.com -site:istockphoto.com -site:depositphotos.com -site:alamy.com -site:dreamstime.com -site:123rf.com -site:stock.adobe.com -site:adobestock.com -site:freepik.com -site:pexels.com -site:unsplash.com -site:pixabay.com -site:stocksy.com -site:pond5.com'
+/** Bing site: exclusions were appended to every image query — removed; filter URLs post-fetch instead. */
 
-const ADULT_SITE_EXCLUSIONS =
-  '-site:pornhub.com -site:xvideos.com -site:xnxx.com -site:xhamster.com -site:nudevista.com -site:spankbang.com -site:onlyfans.com'
+/** ccTLD / regional suffixes that usually serve non-English pages. */
+const NON_ENGLISH_SITE_SUFFIXES = new Set([
+  'de',
+  'fr',
+  'es',
+  'it',
+  'jp',
+  'co.jp',
+  'ne.jp',
+  'cn',
+  'com.cn',
+  'ru',
+  'su',
+  'br',
+  'com.br',
+  'mx',
+  'com.mx',
+  'kr',
+  'co.kr',
+  'tw',
+  'com.tw',
+  'nl',
+  'pl',
+  'tr',
+  'com.tr',
+  'ar',
+  'com.ar',
+  'cl',
+  'co',
+  'com.co',
+  'at',
+  'ch',
+  'be',
+  'se',
+  'no',
+  'dk',
+  'fi',
+  'cz',
+  'sk',
+  'hu',
+  'ro',
+  'bg',
+  'gr',
+  'pt',
+  'ua',
+  'by',
+  'kz',
+  'vn',
+  'com.vn',
+  'th',
+  'co.th',
+  'id',
+  'co.id',
+  'sa',
+  'eg',
+  'ir',
+  'iq',
+  'il',
+  'eu',
+])
+
+/** Suffixes for English-primary regions and generic gTLDs. */
+const ENGLISH_SITE_SUFFIXES = new Set([
+  'com',
+  'org',
+  'net',
+  'edu',
+  'gov',
+  'mil',
+  'uk',
+  'co.uk',
+  'org.uk',
+  'ac.uk',
+  'gov.uk',
+  'us',
+  'ca',
+  'com.ca',
+  'au',
+  'com.au',
+  'net.au',
+  'nz',
+  'co.nz',
+  'ie',
+  'co.ie',
+  'io',
+  'me',
+  'tv',
+  'in',
+  'sg',
+  'co.za',
+  'za',
+])
+
+/** CDNs and image hosts commonly used by English-language sites. */
+const ENGLISH_CDN_HOST_HINTS = [
+  'wikimedia.org',
+  'wikipedia.org',
+  'imgur.com',
+  'giphy.com',
+  'tenor.com',
+  'googleusercontent.com',
+  'ggpht.com',
+  'ytimg.com',
+  'cloudfront.net',
+  'amazonaws.com',
+  'akamaihd.net',
+  'fastly.net',
+  'cloudflare.com',
+  'wp.com',
+  'fbsbx.com',
+  'fbcdn.net',
+  'twimg.com',
+  'yimg.com',
+]
+
+const NON_ENGLISH_PATH_HINTS = [
+  '/de/',
+  '/fr/',
+  '/es/',
+  '/it/',
+  '/ja/',
+  '/ko/',
+  '/zh/',
+  '/pt/',
+  '/ru/',
+  '/pl/',
+  '/nl/',
+  '/tr/',
+  '/ar/',
+  '/noticias/',
+  '/nachrichten/',
+  '/actualites/',
+  '/actualidad/',
+  'lang=de',
+  'lang=fr',
+  'lang=es',
+  'lang=it',
+  'lang=ja',
+  'lang=zh',
+  'hl=de',
+  'hl=fr',
+  'hl=es',
+  'hl=it',
+  'hl=ja',
+  'hl=zh',
+]
 
 /** Photos + GIFs — no clipart/line art Bing filters. */
 const BING_STYLES = ['photo', 'photo', 'gif', 'photo'] as const
@@ -237,9 +452,15 @@ function headlineSearchContext(headline: string, word: string): string {
     'under',
     'about',
   ])
+  const searchParts = new Set(
+    word
+      .split(/\s+/)
+      .map((part) => part.toLowerCase().replace(/[^a-z0-9]/g, ''))
+      .filter(Boolean),
+  )
   const words = cleaned
     .split(/\s+/)
-    .filter((w) => w.toLowerCase().replace(/[^a-z0-9]/g, '') !== word.toLowerCase().replace(/[^a-z0-9]/g, ''))
+    .filter((w) => !searchParts.has(w.toLowerCase().replace(/[^a-z0-9]/g, '')))
     .filter((w) => !stop.has(w.toLowerCase().replace(/[^a-z']/g, '')))
   return words.slice(0, 4).join(' ').slice(0, 40)
 }
@@ -265,7 +486,7 @@ async function resolveProperNounSearchTerms(
 
   try {
     const apiUrl = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(word)}&limit=5&format=json`
-    const res = await fetchWithTimeout(apiUrl, {}, 3000)
+    const res = await fetchWithTimeout(apiUrl, { headers: WIKIPEDIA_HEADERS }, 3000)
     if (!res.ok) return [word]
 
     const json = (await res.json()) as [string, string[]]
@@ -300,10 +521,10 @@ async function resolveProperNounSearchTerms(
   return [word]
 }
 
-async function getWikipediaThumbnail(title: string): Promise<string | null> {
+export async function getWikipediaThumbnail(title: string): Promise<string | null> {
   try {
     const apiUrl = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&pithumbsize=800&format=json`
-    const res = await fetchWithTimeout(apiUrl, {}, 3000)
+    const res = await fetchWithTimeout(apiUrl, { headers: WIKIPEDIA_HEADERS }, 3000)
     if (!res.ok) return null
     const json = (await res.json()) as {
       query?: { pages?: Record<string, { thumbnail?: { source?: string } }> }
@@ -427,7 +648,15 @@ function isLowQualityForProperNoun(url: string): boolean {
 }
 
 export function isLikelyProperNoun(word: string): boolean {
-  return /^[A-Z][a-z]+(?:[''\u2019][a-z]+)?$/.test(word) || /^[A-Z]{2,}$/.test(word)
+  const parts = word.split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) {
+    return parts.every((part) => isTitleCaseToken(part) || /^[A-Z]{2,}$/.test(part))
+  }
+  if (parts.length === 1) {
+    if (!isTitleCaseToken(word) && !/^[A-Z]{2,}$/.test(word)) return false
+    return !COMMON_CAPITALIZED_HEADLINE_WORDS.has(word.toLowerCase())
+  }
+  return false
 }
 
 function isLikelyGif(url: string): boolean {
@@ -452,7 +681,37 @@ function isStockUrl(url: string): boolean {
 }
 
 function withStockExclusions(query: string): string {
-  return `${query} ${STOCK_SITE_EXCLUSIONS} ${ADULT_SITE_EXCLUSIONS}`
+  // Post-filter stock/adult URLs instead — inline -site: clauses corrupt Bing relevance.
+  return query
+}
+
+function hostnameSuffix(hostname: string, suffixes: Set<string>): boolean {
+  const parts = hostname.split('.')
+  for (let len = 3; len >= 1; len--) {
+    const suffix = parts.slice(-len).join('.')
+    if (suffixes.has(suffix)) return true
+  }
+  return false
+}
+
+export function isLikelyEnglishSite(url: string): boolean {
+  let hostname: string
+  try {
+    hostname = new URL(url).hostname.toLowerCase()
+  } catch {
+    return false
+  }
+
+  if (ENGLISH_CDN_HOST_HINTS.some((hint) => hostname.includes(hint))) return true
+  if (hostnameSuffix(hostname, NON_ENGLISH_SITE_SUFFIXES)) return false
+
+  const lower = url.toLowerCase()
+  if (NON_ENGLISH_PATH_HINTS.some((hint) => lower.includes(hint))) return false
+
+  if (hostnameSuffix(hostname, ENGLISH_SITE_SUFFIXES)) return true
+
+  // Unknown regional TLD — reject to stay English-only.
+  return false
 }
 
 function extractBingImageUrls(html: string): string[] {
@@ -474,6 +733,7 @@ function extractBingImageUrls(html: string): string[] {
         !isStockUrl(url) &&
         !isLikelyDrawing(url) &&
         !isAdultUrl(url) &&
+        isLikelyEnglishSite(url) &&
         !seen.has(url)
       ) {
         seen.add(url)
@@ -501,7 +761,7 @@ function prioritizeCandidates(urls: string[], properNoun = false): string[] {
   const lowQuality: string[] = []
 
   for (const url of urls) {
-    if (isStockUrl(url) || isLikelyDrawing(url) || isAdultUrl(url)) continue
+    if (isStockUrl(url) || isLikelyDrawing(url) || isAdultUrl(url) || !isLikelyEnglishSite(url)) continue
     if (properNoun && isLowQualityForProperNoun(url)) {
       lowQuality.push(url)
       continue
@@ -530,16 +790,20 @@ export function picsumFallback(word: string): string {
   return `https://picsum.photos/seed/${stableHash(word)}/800/500`
 }
 
+/** Set false to search each token in isolation (no headline role/context/disambiguation). */
+export const HEADLINE_CONTEXT_IN_IMAGE_SEARCH = false
+
 /** Return several Bing image URLs for a word, best-effort. */
 export async function getBingImageCandidates(
   word: string,
   options: { headline?: string } = {},
 ): Promise<string[]> {
+  const headline = HEADLINE_CONTEXT_IN_IMAGE_SEARCH ? options.headline : undefined
   const properNoun = isLikelyProperNoun(word)
   const searchTerms = properNoun
-    ? await resolveProperNounSearchTerms(word, options.headline)
+    ? await resolveProperNounSearchTerms(word, headline)
     : [word]
-  const queryPasses = buildQueryPasses(word, options.headline, searchTerms)
+  const queryPasses = buildQueryPasses(word, headline, searchTerms)
   const targetCount = 16
   const fetchTimeoutMs = 6000
   const resultCount = '35'
@@ -551,6 +815,8 @@ export async function getBingImageCandidates(
     url.searchParams.set('count', resultCount)
     url.searchParams.set('adlt', 'off')
     url.searchParams.set('mkt', 'en-US')
+    url.searchParams.set('setlang', 'en')
+    url.searchParams.set('cc', 'US')
     if (filter) url.searchParams.set('qft', filter)
 
     try {
@@ -591,6 +857,7 @@ export async function getBingImageCandidates(
 }
 
 export function shouldRejectImage(url: string, word?: string): boolean {
+  if (!isLikelyEnglishSite(url)) return true
   if (isStockUrl(url) || isLikelyDrawing(url) || isAdultUrl(url)) return true
   if (word && isLikelyProperNoun(word) && isLowQualityForProperNoun(url)) return true
   return false

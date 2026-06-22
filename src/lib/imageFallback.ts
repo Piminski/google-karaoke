@@ -22,10 +22,7 @@ export function fallbackChainForWord(
   const chain = [
     primary,
     ...alternates,
-    loremFallback(word),
     picsumFallback(word),
-    loremFallback(`${word}-alt`),
-    picsumFallback(`${word}-alt`),
   ].filter((url): url is string => Boolean(url))
 
   return [...new Set(chain)]
