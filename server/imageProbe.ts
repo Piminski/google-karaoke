@@ -59,6 +59,37 @@ function looksLikeImage(bytes: Uint8Array): boolean {
   return false
 }
 
+export async function buildValidatedPool(
+  candidates: string[],
+  options: {
+    maxValid?: number
+    maxProbe?: number
+    shouldSkip?: ImageUrlFilter
+    fallbacks?: string[]
+  } = {},
+): Promise<string[]> {
+  const maxValid = options.maxValid ?? 5
+  const maxProbe = options.maxProbe ?? 8
+  const shouldSkip = options.shouldSkip ?? (() => false)
+  const fallbacks = options.fallbacks ?? []
+
+  const toTry = candidates.filter((url) => url && !shouldSkip(url)).slice(0, maxProbe)
+
+  const pool: string[] = []
+  for (const url of toTry) {
+    if (pool.length >= maxValid) break
+    if (pool.includes(url)) continue
+    if (await probeImageUrl(url)) pool.push(url)
+  }
+
+  for (const fallback of fallbacks) {
+    if (pool.length >= maxValid) break
+    if (fallback && !pool.includes(fallback)) pool.push(fallback)
+  }
+
+  return pool.length > 0 ? pool : fallbacks.filter(Boolean).slice(0, 1)
+}
+
 export async function firstWorkingImageUrl(
   candidates: string[],
   maxTries = 6,

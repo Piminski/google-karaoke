@@ -6,7 +6,7 @@ import {
   picsumFallback,
   stableHash,
 } from './imageSearch.ts'
-import { firstWorkingImageUrl } from './imageProbe.ts'
+import { buildValidatedPool } from './imageProbe.ts'
 
 export interface HeadlineEntry {
   text: string
@@ -17,6 +17,17 @@ export interface HeadlineEntry {
 export interface NewsPathData {
   headlines: HeadlineEntry[]
   usingBingImages: boolean
+}
+
+/** Shorter words get larger pools — they repeat more often in headlines. */
+function poolSizeForWord(key: string): number {
+  const len = key.length
+  if (len <= 2) return 10
+  if (len <= 3) return 8
+  if (len <= 4) return 6
+  if (len <= 6) return 4
+  if (len <= 8) return 3
+  return 2
 }
 
 function decodeHtmlEntities(str: string): string {
@@ -32,6 +43,10 @@ function decodeHtmlEntities(str: string): string {
 
 function splitHeadlineWords(headline: string): string[] {
   return headline.split(/\s+/).filter(Boolean)
+}
+
+function wordKey(word: string): string {
+  return word.toLowerCase().replace(/[^a-z0-9]/g, '') || `w${stableHash(word)}`
 }
 
 async function mapWithConcurrency<T, R>(
@@ -82,34 +97,76 @@ export async function fetchNewsPath(): Promise<NewsPathData> {
     itemMatch = itemRegex.exec(rssText)
   }
 
-  const headlineTexts = allTitles.slice(0, 15)
-  const imageCache = new Map<string, string>()
+  const headlineLimit = process.env.VERCEL ? 10 : 15
+  const headlineTexts = allTitles.slice(0, headlineLimit)
+  const poolsByWord = new Map<string, string[]>()
+  const poolBuilders = new Map<string, Promise<string[]>>()
+  const bingCandidatesByWord = new Map<string, string[]>()
+  const wordOccurrence = new Map<string, number>()
   let bingHits = 0
 
-  async function getImageForWord(word: string): Promise<string> {
-    const cacheKey = word.toLowerCase().replace(/[^a-z0-9]/g, '') || `w${stableHash(word)}`
+  const rejectBadImage = (url: string) => isStockUrl(url) || isLikelyDrawing(url)
 
-    if (imageCache.has(cacheKey)) {
-      return imageCache.get(cacheKey)!
+  async function ensurePool(word: string, key: string): Promise<string[]> {
+    const cached = poolsByWord.get(key)
+    if (cached) return cached
+
+    let builder = poolBuilders.get(key)
+    if (!builder) {
+      builder = (async () => {
+        const bingCandidates = (await getBingImageCandidates(word)).filter(
+          (url) => !rejectBadImage(url),
+        )
+        bingCandidatesByWord.set(key, bingCandidates)
+
+        const maxValid = poolSizeForWord(key)
+        const pool = await buildValidatedPool(bingCandidates, {
+          maxValid: 1,
+          maxProbe: 5,
+          shouldSkip: rejectBadImage,
+          fallbacks: [
+            loremFallback(word),
+            picsumFallback(word),
+            loremFallback(`${word}-alt`),
+          ],
+        })
+
+        for (const candidate of bingCandidates) {
+          if (pool.length >= maxValid) break
+          if (!pool.includes(candidate)) pool.push(candidate)
+        }
+
+        let pad = 0
+        while (pool.length < maxValid) {
+          const fallback =
+            pad % 2 === 0
+              ? loremFallback(`${word}-${pad}`)
+              : picsumFallback(`${word}-${pad}`)
+          if (!pool.includes(fallback)) pool.push(fallback)
+          else pool.push(picsumFallback(`${word}-x${pad}-${stableHash(word)}`))
+          pad++
+        }
+
+        poolsByWord.set(key, pool)
+        return pool
+      })()
+      poolBuilders.set(key, builder)
     }
 
-    const bingCandidates = (await getBingImageCandidates(word)).filter(
-      (url) => !isStockUrl(url) && !isLikelyDrawing(url),
-    )
-    const fallbackChain = [
-      ...bingCandidates,
-      loremFallback(word),
-      picsumFallback(word),
-      loremFallback(`${word}-alt`),
-    ]
+    return builder
+  }
 
-    const rejectBadImage = (url: string) => isStockUrl(url) || isLikelyDrawing(url)
-    const working = await firstWorkingImageUrl(fallbackChain, 8, rejectBadImage)
-    const url = working ?? picsumFallback(word)
+  async function getImageForWord(word: string): Promise<string> {
+    const key = wordKey(word)
+    const occurrence = wordOccurrence.get(key) ?? 0
+    wordOccurrence.set(key, occurrence + 1)
 
+    const pool = await ensurePool(word, key)
+    const url = pool[occurrence % pool.length]
+
+    const bingCandidates = bingCandidatesByWord.get(key) ?? []
     if (bingCandidates.includes(url)) bingHits++
 
-    imageCache.set(cacheKey, url)
     return url
   }
 

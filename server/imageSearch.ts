@@ -68,10 +68,20 @@ const STOCK_URL_HINTS = [
 const STOCK_SITE_EXCLUSIONS =
   '-site:shutterstock.com -site:gettyimages.com -site:istockphoto.com -site:depositphotos.com -site:alamy.com -site:dreamstime.com -site:123rf.com -site:stock.adobe.com -site:adobestock.com -site:freepik.com -site:pexels.com -site:unsplash.com -site:pixabay.com -site:stocksy.com -site:pond5.com'
 
-/** Photos + GIFs for scruffy web feel — no clipart/line art filters. */
-const BING_STYLES = ['photo', 'photo', 'gif', ''] as const
+/** Photos + GIFs — no clipart/line art Bing filters. */
+const BING_STYLES = ['photo', 'photo', 'gif', 'photo'] as const
 
-const QUERY_SUFFIXES = ['', ' photo', ' meme', ' screenshot', ' vintage', ' weird']
+const QUERY_SUFFIXES = ['', ' photo', ' gif', ' meme', ' screenshot', ' vintage', ' weird']
+
+const GIF_URL_HINTS = [
+  'giphy.com',
+  'tenor.com',
+  'media.tumblr.com',
+  'i.imgur.com',
+  '/gif/',
+  '-gif.',
+  '_gif.',
+]
 
 const DRAWING_URL_HINTS = [
   'clipart',
@@ -118,6 +128,12 @@ function bingFilter(style: (typeof BING_STYLES)[number]): string {
 function isLikelyDrawing(url: string): boolean {
   const lower = url.toLowerCase()
   return DRAWING_URL_HINTS.some((hint) => lower.includes(hint))
+}
+
+function isLikelyGif(url: string): boolean {
+  const lower = url.toLowerCase()
+  if (/\.gif(?:[?#]|$)/.test(lower)) return true
+  return GIF_URL_HINTS.some((hint) => lower.includes(hint))
 }
 
 function decodeBingUrl(raw: string): string {
@@ -178,7 +194,16 @@ function stableHash(str: string): number {
 }
 
 function prioritizeCandidates(urls: string[]): string[] {
-  return urls.filter((url) => !isStockUrl(url) && !isLikelyDrawing(url))
+  const gifs: string[] = []
+  const photos: string[] = []
+
+  for (const url of urls) {
+    if (isStockUrl(url) || isLikelyDrawing(url)) continue
+    if (isLikelyGif(url)) gifs.push(url)
+    else photos.push(url)
+  }
+
+  return [...gifs, ...photos]
 }
 
 function shuffleCandidates(urls: string[], word: string): string[] {
@@ -202,15 +227,16 @@ export async function getBingImageCandidates(word: string): Promise<string[]> {
   const suffix = QUERY_SUFFIXES[stableHash(`${word}:suffix`) % QUERY_SUFFIXES.length]
   const queryPasses: { query: string; filter: string }[] = [
     { query: withStockExclusions(`${word} photo`), filter: '+filterui:photo-photo' },
+    { query: withStockExclusions(`${word} gif`), filter: '+filterui:photo-animatedgif' },
     { query: withStockExclusions(`${word}${suffix}`), filter: bingFilter(style) },
-    { query: withStockExclusions(word), filter: '' },
+    { query: withStockExclusions(`${word} meme`), filter: '+filterui:photo-photo' },
   ]
 
   const collected: string[] = []
   const seen = new Set<string>()
 
   for (const { query, filter } of queryPasses) {
-    if (collected.length >= 12) break
+    if (collected.length >= 16) break
 
     const url = new URL('https://www.bing.com/images/async')
     url.searchParams.set('q', query)
@@ -249,4 +275,4 @@ export async function getBingImageCandidates(word: string): Promise<string[]> {
   return shuffleCandidates(collected, word)
 }
 
-export { stableHash, isStockUrl, isLikelyDrawing }
+export { stableHash, isStockUrl, isLikelyDrawing, isLikelyGif }

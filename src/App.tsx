@@ -26,7 +26,7 @@ async function fetchNewsPath(): Promise<NewsPathData> {
 }
 
 export default function App() {
-  const { data, isLoading } = useQuery<NewsPathData>({
+  const { data, isLoading, isFetching } = useQuery<NewsPathData>({
     queryKey: ['news-path'],
     queryFn: fetchNewsPath,
     staleTime: 5 * 60 * 1000,
@@ -80,6 +80,16 @@ export default function App() {
       window.clearTimeout(timeoutId)
     }
   }, [headlineIdx, data?.headlines.length, words.length])
+
+  if ((isLoading || isFetching) && !data) {
+    return (
+      <div className="frame-shell">
+        <div className="frame flex items-center justify-center">
+          <p className="animate-pulse text-sm text-white/50">Loading headlines…</p>
+        </div>
+      </div>
+    )
+  }
 
   if (isLoading || !headline || !displaySrc) {
     return (
