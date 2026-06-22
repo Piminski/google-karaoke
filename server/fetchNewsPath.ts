@@ -7,6 +7,7 @@ import {
   stableHash,
 } from './imageSearch.js'
 import { buildValidatedPool } from './imageProbe.js'
+import { fetchWithTimeout } from './fetchWithTimeout.js'
 
 export interface HeadlineEntry {
   text: string
@@ -72,20 +73,6 @@ async function mapWithConcurrency<T, R>(
   return results
 }
 
-async function fetchWithTimeout(
-  url: string,
-  init: RequestInit,
-  ms = 8000,
-): Promise<Response> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), ms)
-  try {
-    return await fetch(url, { ...init, signal: controller.signal })
-  } finally {
-    clearTimeout(timeout)
-  }
-}
-
 export async function fetchNewsPath(): Promise<NewsPathData> {
   const isVercel = Boolean(process.env.VERCEL)
   const rssUrl = 'https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en'
@@ -142,40 +129,25 @@ export async function fetchNewsPath(): Promise<NewsPathData> {
           loremFallback(`${word}-alt`),
         ]
 
-        if (isVercel) {
-          // Bing image search is too slow/unreliable from Vercel's network — use
-          // seeded fallback URLs; the client still retries on image load errors.
-          const pool: string[] = []
-          let pad = 0
-          while (pool.length < maxValid) {
-            const candidate =
-              pad < fallbacks.length
-                ? fallbacks[pad]
-                : pad % 2 === 0
-                  ? loremFallback(`${word}-${pad}`)
-                  : picsumFallback(`${word}-${pad}`)
-            if (!pool.includes(candidate)) pool.push(candidate)
-            pad++
-          }
-          poolsByWord.set(key, pool)
-          return pool
-        }
-
-        const bingCandidates = (await getBingImageCandidates(word)).filter(
-          (url) => !rejectBadImage(url),
-        )
+        const bingCandidates = (
+          await getBingImageCandidates(word, { fast: isVercel })
+        ).filter((url) => !rejectBadImage(url))
         bingCandidatesByWord.set(key, bingCandidates)
 
-        const pool = await buildValidatedPool(bingCandidates, {
-          maxValid: 1,
-          maxProbe: 5,
-          shouldSkip: rejectBadImage,
-          fallbacks,
-        })
+        const pool = isVercel
+          ? [...bingCandidates.slice(0, maxValid)]
+          : await buildValidatedPool(bingCandidates, {
+              maxValid: 1,
+              maxProbe: 5,
+              shouldSkip: rejectBadImage,
+              fallbacks,
+            })
 
-        for (const candidate of bingCandidates) {
-          if (pool.length >= maxValid) break
-          if (!pool.includes(candidate)) pool.push(candidate)
+        if (!isVercel) {
+          for (const candidate of bingCandidates) {
+            if (pool.length >= maxValid) break
+            if (!pool.includes(candidate)) pool.push(candidate)
+          }
         }
 
         let pad = 0

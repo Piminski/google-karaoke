@@ -1,3 +1,14 @@
+import { fetchWithTimeout } from './fetchWithTimeout.js'
+
+const BING_HEADERS = {
+  'User-Agent':
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  Accept:
+    'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+  Referer: 'https://www.bing.com/',
+} as const
+
 const STOCK_HOSTS = [
   'shutterstock.com',
   'gettyimages.com',
@@ -236,44 +247,48 @@ export async function getBingImageCandidates(
     { query: withStockExclusions(`${word} meme`), filter: '+filterui:photo-photo' },
   ].slice(0, fast ? 2 : 4)
 
-  const collected: string[] = []
-  const seen = new Set<string>()
   const targetCount = fast ? 8 : 16
+  const fetchTimeoutMs = fast ? 4500 : 8000
 
-  for (const { query, filter } of queryPasses) {
-    if (collected.length >= targetCount) break
-
+  async function runPass({ query, filter }: { query: string; filter: string }): Promise<string[]> {
     const url = new URL('https://www.bing.com/images/async')
     url.searchParams.set('q', query)
     url.searchParams.set('first', '0')
-    url.searchParams.set('count', '35')
+    url.searchParams.set('count', fast ? '20' : '35')
     url.searchParams.set('adlt', 'off')
     url.searchParams.set('mkt', 'en-US')
     if (filter) url.searchParams.set('qft', filter)
 
     try {
-      const res = await fetch(url.toString(), {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          Accept:
-            'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-          Referer: 'https://www.bing.com/',
-        },
-      })
-
-      if (!res.ok) continue
-
+      const res = await fetchWithTimeout(url.toString(), { headers: BING_HEADERS }, fetchTimeoutMs)
+      if (!res.ok) return []
       const html = await res.text()
-      for (const candidate of extractBingImageUrls(html)) {
-        if (!seen.has(candidate)) {
-          seen.add(candidate)
-          collected.push(candidate)
-        }
-      }
+      return extractBingImageUrls(html)
     } catch {
-      /* try next query */
+      return []
+    }
+  }
+
+  const collected: string[] = []
+  const seen = new Set<string>()
+
+  function mergeUrls(urls: string[]) {
+    for (const candidate of urls) {
+      if (collected.length >= targetCount) return
+      if (!seen.has(candidate)) {
+        seen.add(candidate)
+        collected.push(candidate)
+      }
+    }
+  }
+
+  if (fast) {
+    const passResults = await Promise.all(queryPasses.map(runPass))
+    for (const urls of passResults) mergeUrls(urls)
+  } else {
+    for (const pass of queryPasses) {
+      if (collected.length >= targetCount) break
+      mergeUrls(await runPass(pass))
     }
   }
 
