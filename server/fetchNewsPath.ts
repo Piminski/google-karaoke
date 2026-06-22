@@ -1,12 +1,12 @@
 import {
   getBingImageCandidates,
-  isLikelyDrawing,
-  isStockUrl,
+  isLikelyProperNoun,
   loremFallback,
   picsumFallback,
+  shouldRejectImage,
   stableHash,
 } from './imageSearch.js'
-import { buildValidatedPool, pickWorkingUrlsParallel } from './imageProbe.js'
+import { pickWorkingUrlsParallel } from './imageProbe.js'
 import { fetchWithTimeout } from './fetchWithTimeout.js'
 
 export interface HeadlineEntry {
@@ -22,16 +22,14 @@ export interface NewsPathData {
 }
 
 /** Shorter words get larger pools — they repeat more often in headlines. */
-function poolSizeForWord(key: string, isVercel: boolean): number {
+function poolSizeForWord(key: string): number {
   const len = key.length
-  let size: number
-  if (len <= 2) size = 10
-  else if (len <= 3) size = 8
-  else if (len <= 4) size = 6
-  else if (len <= 6) size = 4
-  else if (len <= 8) size = 3
-  else size = 2
-  return isVercel ? Math.min(size, 5) : size
+  if (len <= 2) return 10
+  if (len <= 3) return 8
+  if (len <= 4) return 6
+  if (len <= 6) return 4
+  if (len <= 8) return 3
+  return 2
 }
 
 function decodeHtmlEntities(str: string): string {
@@ -118,16 +116,16 @@ export async function fetchNewsPath(): Promise<NewsPathData> {
   const wordOccurrence = new Map<string, number>()
   let bingHits = 0
 
-  const rejectBadImage = (url: string) => isStockUrl(url) || isLikelyDrawing(url)
+  const rejectBadImage = (url: string, word: string) => shouldRejectImage(url, word)
 
-  async function ensurePool(word: string, key: string): Promise<string[]> {
+  async function ensurePool(word: string, key: string, headline: string): Promise<string[]> {
     const cached = poolsByWord.get(key)
     if (cached) return cached
 
     let builder = poolBuilders.get(key)
     if (!builder) {
       builder = (async () => {
-        const maxValid = poolSizeForWord(key, isVercel)
+        const maxValid = poolSizeForWord(key)
         const fallbacks = [
           loremFallback(word),
           picsumFallback(word),
@@ -135,26 +133,18 @@ export async function fetchNewsPath(): Promise<NewsPathData> {
         ]
 
         const bingCandidates = (
-          await getBingImageCandidates(word, { vercel: isVercel })
-        ).filter((url) => !rejectBadImage(url))
+          await getBingImageCandidates(word, { headline })
+        ).filter((url) => !rejectBadImage(url, word))
         bingCandidatesByWord.set(key, bingCandidates)
 
-        let pool: string[]
-        if (isVercel) {
-          pool = await pickWorkingUrlsParallel(bingCandidates, {
-            maxValid,
-            maxProbe: 12,
-            timeoutMs: 2200,
-            shouldSkip: rejectBadImage,
-          })
-        } else {
-          pool = await buildValidatedPool(bingCandidates, {
-            maxValid: 1,
-            maxProbe: 5,
-            shouldSkip: rejectBadImage,
-            fallbacks: [],
-          })
-        }
+        const pool = isLikelyProperNoun(word)
+          ? bingCandidates.slice(0, maxValid)
+          : await pickWorkingUrlsParallel(bingCandidates, {
+              maxValid,
+              maxProbe: 10,
+              timeoutMs: isVercel ? 2200 : 3500,
+              shouldSkip: (url) => rejectBadImage(url, word),
+            })
 
         for (const candidate of bingCandidates) {
           if (pool.length >= maxValid) break
@@ -177,12 +167,15 @@ export async function fetchNewsPath(): Promise<NewsPathData> {
     return builder
   }
 
-  async function resolveWordImages(word: string): Promise<{ primary: string; alternates: string[] }> {
+  async function resolveWordImages(
+    word: string,
+    headline: string,
+  ): Promise<{ primary: string; alternates: string[] }> {
     const key = wordKey(word)
     const occurrence = wordOccurrence.get(key) ?? 0
     wordOccurrence.set(key, occurrence + 1)
 
-    const pool = await ensurePool(word, key)
+    const pool = await ensurePool(word, key, headline)
     const bingCandidates = bingCandidatesByWord.get(key) ?? []
     const primary =
       pool[occurrence % pool.length] ?? pool[0] ?? bingCandidates[0] ?? loremFallback(word)
@@ -199,7 +192,9 @@ export async function fetchNewsPath(): Promise<NewsPathData> {
 
   const headlines = await mapWithConcurrency(headlineTexts, isVercel ? 3 : 2, async (text) => {
     const words = splitHeadlineWords(text)
-    const resolved = await mapWithConcurrency(words, isVercel ? 8 : 4, (word) => resolveWordImages(word))
+    const resolved = await mapWithConcurrency(words, isVercel ? 8 : 4, (word) =>
+      resolveWordImages(word, text),
+    )
     return {
       text,
       words,

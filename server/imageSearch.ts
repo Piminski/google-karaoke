@@ -79,6 +79,9 @@ const STOCK_URL_HINTS = [
 const STOCK_SITE_EXCLUSIONS =
   '-site:shutterstock.com -site:gettyimages.com -site:istockphoto.com -site:depositphotos.com -site:alamy.com -site:dreamstime.com -site:123rf.com -site:stock.adobe.com -site:adobestock.com -site:freepik.com -site:pexels.com -site:unsplash.com -site:pixabay.com -site:stocksy.com -site:pond5.com'
 
+const ADULT_SITE_EXCLUSIONS =
+  '-site:pornhub.com -site:xvideos.com -site:xnxx.com -site:xhamster.com -site:nudevista.com -site:spankbang.com -site:onlyfans.com'
+
 /** Photos + GIFs — no clipart/line art Bing filters. */
 const BING_STYLES = ['photo', 'photo', 'gif', 'photo'] as const
 
@@ -93,6 +96,271 @@ const GIF_URL_HINTS = [
   '-gif.',
   '_gif.',
 ]
+
+const ADULT_HOSTS = [
+  'pornhub.com',
+  'xvideos.com',
+  'xnxx.com',
+  'xhamster.com',
+  'redtube.com',
+  'youporn.com',
+  'nudevista.com',
+  'spankbang.com',
+  'eporner.com',
+  'tube8.com',
+  'beeg.com',
+  'onlyfans.com',
+  'chaturbate.com',
+  'livejasmin.com',
+  'stripchat.com',
+  'bongacams.com',
+  'cam4.com',
+  'rule34',
+  'e621.net',
+]
+
+const ADULT_URL_HINTS = [
+  '/porn/',
+  '/xxx/',
+  'pornstar',
+  'nude',
+  'nsfw',
+  'adult-video',
+  'adultphoto',
+]
+
+/** Domains that usually carry news photography — prefer for people/places in headlines. */
+const NEWS_HOST_HINTS = [
+  'reuters.com',
+  'apnews.com',
+  'bbc.co',
+  'bbc.com',
+  'nytimes.com',
+  'washingtonpost.com',
+  'theguardian.com',
+  'cnn.com',
+  'foxnews.com',
+  'nbcnews.com',
+  'cbsnews.com',
+  'abcnews',
+  'politico.com',
+  'politico.eu',
+  'axios.com',
+  'bloomberg.com',
+  'ft.com',
+  'economist.com',
+  'npr.org',
+  'sky.com',
+  'telegraph.co',
+  'independent.co',
+  'huffpost.com',
+  'newsweek.com',
+  'time.com',
+  'wikimedia.org',
+  'wikipedia.org',
+  'parliament.uk',
+  'britannica.com',
+]
+
+/** Product, social, or tabloid hosts — poor results for named people in news. */
+const LOW_QUALITY_HOST_HINTS = [
+  'pinimg.com',
+  'pinterest.',
+  'etsystatic.com',
+  'etsy.com',
+  'ebay.',
+  'amazon.com',
+  'aliexpress.',
+  'wish.com',
+  'nickiswift.com',
+  'thelist.com',
+  'cheatsheet.com',
+  'ranker.com',
+  'buzzfeed.com',
+  'dailymail.co.uk',
+  'goldposter.com',
+  'cinematerial.com',
+  'kinorium.com',
+  'next-episode.net',
+  'scifiscene.de',
+  'zastavki.com',
+  'getwallpapers.com',
+  'pixelstalk.net',
+  'wallpaper',
+  'wallpapers',
+  'moewalls.com',
+  'kawaii',
+  'bestinau.com.au',
+]
+
+const ENTERTAINMENT_URL_HINTS = [
+  '/poster',
+  '_poster',
+  '-poster',
+  '/movie/',
+  '/cast/',
+  '/actor/',
+  'movie-poster',
+  'tv-poster',
+  'season-',
+]
+
+function headlineSearchContext(headline: string, word: string): string {
+  const cleaned = headline.replace(/\s*-\s*[^-]+$/, '').trim()
+  const stop = new Set([
+    'says',
+    'said',
+    'the',
+    'a',
+    'an',
+    'as',
+    'in',
+    'on',
+    'at',
+    'to',
+    'for',
+    'and',
+    'or',
+    'but',
+    'he',
+    'she',
+    'they',
+    'will',
+    'yet',
+    'again',
+    'after',
+    'before',
+    'with',
+    'from',
+    'into',
+    'over',
+    'under',
+    'about',
+  ])
+  const words = cleaned
+    .split(/\s+/)
+    .filter((w) => w.toLowerCase().replace(/[^a-z0-9]/g, '') !== word.toLowerCase().replace(/[^a-z0-9]/g, ''))
+    .filter((w) => !stop.has(w.toLowerCase().replace(/[^a-z']/g, '')))
+  return words.slice(0, 4).join(' ').slice(0, 40)
+}
+
+function headlineRoleHints(headline: string): string[] {
+  const lower = headline.toLowerCase()
+  const hints: string[] = []
+  if (lower.includes('prime minister')) hints.push('prime minister')
+  if (lower.includes('vice president')) hints.push('vice president')
+  if (lower.includes('president')) hints.push('president')
+  if (lower.includes('senator')) hints.push('senator')
+  if (lower.includes('minister')) hints.push('minister')
+  if (/\buk\b/.test(lower) || lower.includes('british')) hints.push('UK')
+  if (lower.includes('u.s.') || lower.includes('american')) hints.push('US')
+  return hints
+}
+
+async function resolveProperNounSearchTerms(
+  word: string,
+  headline?: string,
+): Promise<string[]> {
+  const lowerHeadline = (headline ?? '').toLowerCase()
+
+  try {
+    const apiUrl = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(word)}&limit=5&format=json`
+    const res = await fetchWithTimeout(apiUrl, {}, 3000)
+    if (!res.ok) return [word]
+
+    const json = (await res.json()) as [string, string[]]
+    const suggestions = json[1]?.filter(Boolean) ?? []
+    if (suggestions.length === 0) return [word]
+
+    const ranked = suggestions
+      .map((name, index) => {
+        let score = 0
+        const lowerName = name.toLowerCase()
+        if (lowerName !== word.toLowerCase()) score += 10
+        if (name.includes(' ')) score += 3
+        score -= index * 0.1
+
+        for (const part of lowerName.split(/\s+/)) {
+          if (part.length > 2 && lowerHeadline.includes(part)) score += 6
+        }
+        if (lowerHeadline.includes('trump') && lowerName.includes('jd vance')) score += 15
+        if (lowerHeadline.includes('usha') && lowerName.includes('usha')) score += 15
+        if (lowerHeadline.includes('keir') && lowerName.includes('keir')) score += 15
+
+        return { name, score }
+      })
+      .sort((a, b) => b.score - a.score)
+
+    const best = ranked[0]?.name ?? word
+    return [...new Set([best, word, ...ranked.map((r) => r.name)])]
+  } catch {
+    /* best-effort */
+  }
+
+  return [word]
+}
+
+async function getWikipediaThumbnail(title: string): Promise<string | null> {
+  try {
+    const apiUrl = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&pithumbsize=800&format=json`
+    const res = await fetchWithTimeout(apiUrl, {}, 3000)
+    if (!res.ok) return null
+    const json = (await res.json()) as {
+      query?: { pages?: Record<string, { thumbnail?: { source?: string } }> }
+    }
+    const pages = json.query?.pages ?? {}
+    for (const page of Object.values(pages)) {
+      const src = page.thumbnail?.source
+      if (src) return src
+    }
+  } catch {
+    /* best-effort */
+  }
+  return null
+}
+
+function buildQueryPasses(
+  word: string,
+  headline: string | undefined,
+  searchTerms: string[],
+): { query: string; filter: string }[] {
+  const properNoun = isLikelyProperNoun(word)
+  const context = headline ? headlineSearchContext(headline, word) : ''
+  const roles = headline ? headlineRoleHints(headline) : []
+  const primaryTerm = searchTerms[0] ?? word
+  const photoFilter = '+filterui:photo-photo'
+
+  if (properNoun) {
+    const passes: { query: string; filter: string }[] = [
+      { query: withStockExclusions(`${primaryTerm} photo`), filter: photoFilter },
+    ]
+    for (const role of roles.slice(0, 2)) {
+      passes.push({
+        query: withStockExclusions(`${primaryTerm} ${role} photo`),
+        filter: photoFilter,
+      })
+    }
+    if (context) {
+      passes.push({
+        query: withStockExclusions(`${primaryTerm} ${context} photo`),
+        filter: photoFilter,
+      })
+    }
+    if (primaryTerm.toLowerCase() !== word.toLowerCase()) {
+      passes.push({ query: withStockExclusions(`${word} photo`), filter: photoFilter })
+    }
+    return passes
+  }
+
+  const style = BING_STYLES[stableHash(word) % BING_STYLES.length]
+  const suffix = QUERY_SUFFIXES[stableHash(`${word}:suffix`) % QUERY_SUFFIXES.length]
+  return [
+    { query: withStockExclusions(`${word} photo`), filter: '+filterui:photo-photo' },
+    { query: withStockExclusions(`${word} gif`), filter: '+filterui:photo-animatedgif' },
+    { query: withStockExclusions(`${word}${suffix}`), filter: bingFilter(style) },
+    { query: withStockExclusions(`${word} meme`), filter: '+filterui:photo-photo' },
+  ]
+}
 
 const DRAWING_URL_HINTS = [
   'clipart',
@@ -141,6 +409,27 @@ function isLikelyDrawing(url: string): boolean {
   return DRAWING_URL_HINTS.some((hint) => lower.includes(hint))
 }
 
+function isAdultUrl(url: string): boolean {
+  const lower = url.toLowerCase()
+  if (ADULT_HOSTS.some((host) => lower.includes(host))) return true
+  return ADULT_URL_HINTS.some((hint) => lower.includes(hint))
+}
+
+function isLikelyNews(url: string): boolean {
+  const lower = url.toLowerCase()
+  return NEWS_HOST_HINTS.some((hint) => lower.includes(hint))
+}
+
+function isLowQualityForProperNoun(url: string): boolean {
+  const lower = url.toLowerCase()
+  if (LOW_QUALITY_HOST_HINTS.some((hint) => lower.includes(hint))) return true
+  return ENTERTAINMENT_URL_HINTS.some((hint) => lower.includes(hint))
+}
+
+export function isLikelyProperNoun(word: string): boolean {
+  return /^[A-Z][a-z]+(?:[''\u2019][a-z]+)?$/.test(word) || /^[A-Z]{2,}$/.test(word)
+}
+
 function isLikelyGif(url: string): boolean {
   const lower = url.toLowerCase()
   if (/\.gif(?:[?#]|$)/.test(lower)) return true
@@ -163,7 +452,7 @@ function isStockUrl(url: string): boolean {
 }
 
 function withStockExclusions(query: string): string {
-  return `${query} ${STOCK_SITE_EXCLUSIONS}`
+  return `${query} ${STOCK_SITE_EXCLUSIONS} ${ADULT_SITE_EXCLUSIONS}`
 }
 
 function extractBingImageUrls(html: string): string[] {
@@ -184,6 +473,7 @@ function extractBingImageUrls(html: string): string[] {
         url.startsWith('http') &&
         !isStockUrl(url) &&
         !isLikelyDrawing(url) &&
+        !isAdultUrl(url) &&
         !seen.has(url)
       ) {
         seen.add(url)
@@ -204,22 +494,30 @@ function stableHash(str: string): number {
   return Math.abs(hash)
 }
 
-function prioritizeCandidates(urls: string[]): string[] {
+function prioritizeCandidates(urls: string[], properNoun = false): string[] {
+  const news: string[] = []
   const gifs: string[] = []
   const photos: string[] = []
+  const lowQuality: string[] = []
 
   for (const url of urls) {
-    if (isStockUrl(url) || isLikelyDrawing(url)) continue
-    if (isLikelyGif(url)) gifs.push(url)
+    if (isStockUrl(url) || isLikelyDrawing(url) || isAdultUrl(url)) continue
+    if (properNoun && isLowQualityForProperNoun(url)) {
+      lowQuality.push(url)
+      continue
+    }
+    if (isLikelyNews(url)) news.push(url)
+    else if (isLikelyGif(url)) gifs.push(url)
     else photos.push(url)
   }
 
+  if (properNoun) return [...news, ...photos, ...gifs, ...lowQuality]
   return [...gifs, ...photos]
 }
 
-function shuffleCandidates(urls: string[], word: string): string[] {
-  const ordered = prioritizeCandidates(urls)
-  if (ordered.length <= 1) return ordered
+function shuffleCandidates(urls: string[], word: string, properNoun = false): string[] {
+  const ordered = prioritizeCandidates(urls, properNoun)
+  if (properNoun || ordered.length <= 1) return ordered
   const start = stableHash(word) % ordered.length
   return [...ordered.slice(start), ...ordered.slice(0, start)]
 }
@@ -235,21 +533,16 @@ export function picsumFallback(word: string): string {
 /** Return several Bing image URLs for a word, best-effort. */
 export async function getBingImageCandidates(
   word: string,
-  options: { vercel?: boolean } = {},
+  options: { headline?: string } = {},
 ): Promise<string[]> {
-  const vercel = options.vercel ?? false
-  const style = BING_STYLES[stableHash(word) % BING_STYLES.length]
-  const suffix = QUERY_SUFFIXES[stableHash(`${word}:suffix`) % QUERY_SUFFIXES.length]
-  const queryPasses: { query: string; filter: string }[] = [
-    { query: withStockExclusions(`${word} photo`), filter: '+filterui:photo-photo' },
-    { query: withStockExclusions(`${word} gif`), filter: '+filterui:photo-animatedgif' },
-    { query: withStockExclusions(`${word}${suffix}`), filter: bingFilter(style) },
-    { query: withStockExclusions(`${word} meme`), filter: '+filterui:photo-photo' },
-  ]
-
-  const targetCount = vercel ? 14 : 16
-  const fetchTimeoutMs = vercel ? 5000 : 8000
-  const resultCount = vercel ? '28' : '35'
+  const properNoun = isLikelyProperNoun(word)
+  const searchTerms = properNoun
+    ? await resolveProperNounSearchTerms(word, options.headline)
+    : [word]
+  const queryPasses = buildQueryPasses(word, options.headline, searchTerms)
+  const targetCount = 16
+  const fetchTimeoutMs = 6000
+  const resultCount = '35'
 
   async function runPass({ query, filter }: { query: string; filter: string }): Promise<string[]> {
     const url = new URL('https://www.bing.com/images/async')
@@ -286,7 +579,21 @@ export async function getBingImageCandidates(
   const passResults = await Promise.all(queryPasses.map(runPass))
   for (const urls of passResults) mergeUrls(urls)
 
-  return shuffleCandidates(collected, word)
+  if (properNoun) {
+    const wikiThumb = await getWikipediaThumbnail(searchTerms[0] ?? word)
+    if (wikiThumb && !seen.has(wikiThumb)) {
+      collected.unshift(wikiThumb)
+      seen.add(wikiThumb)
+    }
+  }
+
+  return shuffleCandidates(collected, word, properNoun)
 }
 
-export { stableHash, isStockUrl, isLikelyDrawing, isLikelyGif }
+export function shouldRejectImage(url: string, word?: string): boolean {
+  if (isStockUrl(url) || isLikelyDrawing(url) || isAdultUrl(url)) return true
+  if (word && isLikelyProperNoun(word) && isLowQualityForProperNoun(url)) return true
+  return false
+}
+
+export { stableHash, isStockUrl, isLikelyDrawing, isLikelyGif, isAdultUrl }

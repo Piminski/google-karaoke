@@ -105,21 +105,19 @@ export async function pickWorkingUrlsParallel(
   const shouldSkip = options.shouldSkip ?? (() => false)
 
   const toTry = candidates.filter((url) => url && !shouldSkip(url)).slice(0, maxProbe)
-  const pool: string[] = []
-  const batchSize = 4
+  const results = await Promise.all(
+    toTry.map(async (url, index) => ({
+      url,
+      index,
+      ok: await probeImageUrl(url, timeoutMs),
+    })),
+  )
 
-  for (let i = 0; i < toTry.length && pool.length < maxValid; i += batchSize) {
-    const batch = toTry.slice(i, i + batchSize)
-    const results = await Promise.all(
-      batch.map(async (url) => ({ url, ok: await probeImageUrl(url, timeoutMs) })),
-    )
-    for (const { url, ok } of results) {
-      if (ok && !pool.includes(url)) pool.push(url)
-      if (pool.length >= maxValid) break
-    }
-  }
-
-  return pool
+  return results
+    .filter((r) => r.ok)
+    .sort((a, b) => a.index - b.index)
+    .slice(0, maxValid)
+    .map((r) => r.url)
 }
 
 export async function firstWorkingImageUrl(
