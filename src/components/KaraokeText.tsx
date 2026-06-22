@@ -25,6 +25,7 @@ const CSS = `
   }
   .karaoke-word--active {
     animation: karaoke-pop-in var(--pop-duration, 200ms) ease-out;
+    transition: -webkit-text-stroke 120ms ease-out;
   }
   @keyframes karaoke-pop-in {
     from {
@@ -89,19 +90,12 @@ export const KaraokeText = React.memo(function KaraokeText({
     return () => observer.disconnect()
   }, [headlineKey])
 
-  const outlineStyle: React.CSSProperties = {
-    WebkitTextStroke: `${karaokeStyle.outlineWidthPx}px ${karaokeStyle.outlineColor}`,
-  }
-
-  const spokenStyle: React.CSSProperties = {
-    ...outlineStyle,
-    color: karaokeStyle.spokenColor,
-  }
-
-  const pendingStyle: React.CSSProperties = {
-    ...outlineStyle,
-    color: karaokeStyle.pendingColor,
-  }
+  const wordStyle = (active: boolean): React.CSSProperties => ({
+    color: karaokeStyle.textColor,
+    WebkitTextStroke: active
+      ? `${karaokeStyle.activeOutlineWidthPx}px ${karaokeStyle.activeOutlineColor}`
+      : `${karaokeStyle.outlineWidthPx}px ${karaokeStyle.outlineColor}`,
+  })
 
   return (
     <>
@@ -117,7 +111,6 @@ export const KaraokeText = React.memo(function KaraokeText({
           }}
         >
           {words.map((word, wordIndex) => {
-            const isSpoken = wordIndex <= activeWordIndex
             const isActive = wordIndex === activeWordIndex
 
             return (
@@ -126,12 +119,11 @@ export const KaraokeText = React.memo(function KaraokeText({
                 <span
                   className={[
                     'karaoke-word',
-                    isSpoken ? 'karaoke-word--spoken' : '',
                     isActive ? 'karaoke-word--active' : '',
                   ]
                     .filter(Boolean)
                     .join(' ')}
-                  style={isSpoken ? spokenStyle : pendingStyle}
+                  style={wordStyle(isActive)}
                 >
                   {word}
                 </span>

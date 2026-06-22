@@ -4,13 +4,14 @@ export const karaokeStyle = {
   fontWeight: 400,
   /** PopInEnabled + AnimationLength */
   popInDurationMs: 200,
-  /** Future / unspoken words */
-  pendingColor: 'rgba(110, 181, 255, 0.55)',
-  /** FillEnabled — spoken words */
-  spokenColor: '#ffffff',
-  /** OutlineEnabled */
+  /** All words — white fill */
+  textColor: '#ffffff',
+  /** Default outline (non-active words) */
   outlineWidthPx: 2,
   outlineColor: '#2a2a2a',
+  /** Active / highlighted word */
+  activeOutlineWidthPx: 3,
+  activeOutlineColor: '#e53935',
   /** WORD_MS — duration each word stays on screen */
   wordDurationMs: 2400,
   /** Overall headline scale (1 = fill caption area) */
