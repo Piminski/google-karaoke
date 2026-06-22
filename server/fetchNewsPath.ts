@@ -5,8 +5,8 @@ import {
   loremFallback,
   picsumFallback,
   stableHash,
-} from './imageSearch'
-import { buildValidatedPool } from './imageProbe'
+} from './imageSearch.js'
+import { buildValidatedPool } from './imageProbe.js'
 
 export interface HeadlineEntry {
   text: string
@@ -20,14 +20,16 @@ export interface NewsPathData {
 }
 
 /** Shorter words get larger pools — they repeat more often in headlines. */
-function poolSizeForWord(key: string): number {
+function poolSizeForWord(key: string, isVercel: boolean): number {
   const len = key.length
-  if (len <= 2) return 10
-  if (len <= 3) return 8
-  if (len <= 4) return 6
-  if (len <= 6) return 4
-  if (len <= 8) return 3
-  return 2
+  let size: number
+  if (len <= 2) size = 10
+  else if (len <= 3) size = 8
+  else if (len <= 4) size = 6
+  else if (len <= 6) size = 4
+  else if (len <= 8) size = 3
+  else size = 2
+  return isVercel ? Math.min(size, 3) : size
 }
 
 function decodeHtmlEntities(str: string): string {
@@ -71,6 +73,7 @@ async function mapWithConcurrency<T, R>(
 }
 
 export async function fetchNewsPath(): Promise<NewsPathData> {
+  const isVercel = Boolean(process.env.VERCEL)
   const rssUrl = 'https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en'
   const rssRes = await fetch(rssUrl, {
     headers: {
@@ -97,7 +100,7 @@ export async function fetchNewsPath(): Promise<NewsPathData> {
     itemMatch = itemRegex.exec(rssText)
   }
 
-  const headlineLimit = process.env.VERCEL ? 10 : 15
+  const headlineLimit = isVercel ? 5 : 15
   const headlineTexts = allTitles.slice(0, headlineLimit)
   const poolsByWord = new Map<string, string[]>()
   const poolBuilders = new Map<string, Promise<string[]>>()
@@ -114,26 +117,32 @@ export async function fetchNewsPath(): Promise<NewsPathData> {
     let builder = poolBuilders.get(key)
     if (!builder) {
       builder = (async () => {
-        const bingCandidates = (await getBingImageCandidates(word)).filter(
-          (url) => !rejectBadImage(url),
-        )
+        const bingCandidates = (
+          await getBingImageCandidates(word, { fast: isVercel })
+        ).filter((url) => !rejectBadImage(url))
         bingCandidatesByWord.set(key, bingCandidates)
 
-        const maxValid = poolSizeForWord(key)
-        const pool = await buildValidatedPool(bingCandidates, {
-          maxValid: 1,
-          maxProbe: 5,
-          shouldSkip: rejectBadImage,
-          fallbacks: [
-            loremFallback(word),
-            picsumFallback(word),
-            loremFallback(`${word}-alt`),
-          ],
-        })
+        const maxValid = poolSizeForWord(key, isVercel)
+        const fallbacks = [
+          loremFallback(word),
+          picsumFallback(word),
+          loremFallback(`${word}-alt`),
+        ]
 
-        for (const candidate of bingCandidates) {
-          if (pool.length >= maxValid) break
-          if (!pool.includes(candidate)) pool.push(candidate)
+        const pool = isVercel
+          ? [...bingCandidates.slice(0, maxValid)]
+          : await buildValidatedPool(bingCandidates, {
+              maxValid: 1,
+              maxProbe: 5,
+              shouldSkip: rejectBadImage,
+              fallbacks,
+            })
+
+        if (!isVercel) {
+          for (const candidate of bingCandidates) {
+            if (pool.length >= maxValid) break
+            if (!pool.includes(candidate)) pool.push(candidate)
+          }
         }
 
         let pad = 0
@@ -170,9 +179,11 @@ export async function fetchNewsPath(): Promise<NewsPathData> {
     return url
   }
 
-  const headlines = await mapWithConcurrency(headlineTexts, 2, async (text) => {
+  const headlines = await mapWithConcurrency(headlineTexts, isVercel ? 3 : 2, async (text) => {
     const words = splitHeadlineWords(text)
-    const imageUrls = await mapWithConcurrency(words, 4, (word) => getImageForWord(word))
+    const imageUrls = await mapWithConcurrency(words, isVercel ? 8 : 4, (word) =>
+      getImageForWord(word),
+    )
     return { text, words, imageUrls }
   })
 

@@ -222,7 +222,11 @@ export function picsumFallback(word: string): string {
 }
 
 /** Return several Bing image URLs for a word, best-effort. */
-export async function getBingImageCandidates(word: string): Promise<string[]> {
+export async function getBingImageCandidates(
+  word: string,
+  options: { fast?: boolean } = {},
+): Promise<string[]> {
+  const fast = options.fast ?? false
   const style = BING_STYLES[stableHash(word) % BING_STYLES.length]
   const suffix = QUERY_SUFFIXES[stableHash(`${word}:suffix`) % QUERY_SUFFIXES.length]
   const queryPasses: { query: string; filter: string }[] = [
@@ -230,13 +234,14 @@ export async function getBingImageCandidates(word: string): Promise<string[]> {
     { query: withStockExclusions(`${word} gif`), filter: '+filterui:photo-animatedgif' },
     { query: withStockExclusions(`${word}${suffix}`), filter: bingFilter(style) },
     { query: withStockExclusions(`${word} meme`), filter: '+filterui:photo-photo' },
-  ]
+  ].slice(0, fast ? 2 : 4)
 
   const collected: string[] = []
   const seen = new Set<string>()
+  const targetCount = fast ? 8 : 16
 
   for (const { query, filter } of queryPasses) {
-    if (collected.length >= 16) break
+    if (collected.length >= targetCount) break
 
     const url = new URL('https://www.bing.com/images/async')
     url.searchParams.set('q', query)
