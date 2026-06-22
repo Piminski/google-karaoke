@@ -109,7 +109,8 @@ export async function fetchNewsPath(): Promise<NewsPathData> {
     itemMatch = itemRegex.exec(rssText)
   }
 
-  const headlineLimit = isVercel ? 5 : 15
+  // Vercel was capped at 5 for timeout safety; ~9s for 15 headlines with VERCEL=1 locally.
+  const headlineLimit = 15
   const headlineTexts = allTitles.slice(0, headlineLimit)
   const poolsByWord = new Map<string, string[]>()
   const poolBuilders = new Map<string, Promise<string[]>>()
