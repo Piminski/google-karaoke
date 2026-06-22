@@ -6,13 +6,14 @@ import {
   picsumFallback,
   stableHash,
 } from './imageSearch.js'
-import { buildValidatedPool } from './imageProbe.js'
+import { buildValidatedPool, pickWorkingUrlsParallel } from './imageProbe.js'
 import { fetchWithTimeout } from './fetchWithTimeout.js'
 
 export interface HeadlineEntry {
   text: string
   words: string[]
   imageUrls: string[]
+  imageAlternates: string[][]
 }
 
 export interface NewsPathData {
@@ -30,7 +31,7 @@ function poolSizeForWord(key: string, isVercel: boolean): number {
   else if (len <= 6) size = 4
   else if (len <= 8) size = 3
   else size = 2
-  return isVercel ? Math.min(size, 3) : size
+  return isVercel ? Math.min(size, 5) : size
 }
 
 function decodeHtmlEntities(str: string): string {
@@ -71,6 +72,10 @@ async function mapWithConcurrency<T, R>(
     Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
   )
   return results
+}
+
+function isBingUrl(url: string, bingCandidates: string[]): boolean {
+  return bingCandidates.includes(url)
 }
 
 export async function fetchNewsPath(): Promise<NewsPathData> {
@@ -130,35 +135,37 @@ export async function fetchNewsPath(): Promise<NewsPathData> {
         ]
 
         const bingCandidates = (
-          await getBingImageCandidates(word, { fast: isVercel })
+          await getBingImageCandidates(word, { vercel: isVercel })
         ).filter((url) => !rejectBadImage(url))
         bingCandidatesByWord.set(key, bingCandidates)
 
-        const pool = isVercel
-          ? [...bingCandidates.slice(0, maxValid)]
-          : await buildValidatedPool(bingCandidates, {
-              maxValid: 1,
-              maxProbe: 5,
-              shouldSkip: rejectBadImage,
-              fallbacks,
-            })
-
-        if (!isVercel) {
-          for (const candidate of bingCandidates) {
-            if (pool.length >= maxValid) break
-            if (!pool.includes(candidate)) pool.push(candidate)
-          }
+        let pool: string[]
+        if (isVercel) {
+          pool = await pickWorkingUrlsParallel(bingCandidates, {
+            maxValid,
+            maxProbe: 12,
+            timeoutMs: 2200,
+            shouldSkip: rejectBadImage,
+          })
+        } else {
+          pool = await buildValidatedPool(bingCandidates, {
+            maxValid: 1,
+            maxProbe: 5,
+            shouldSkip: rejectBadImage,
+            fallbacks: [],
+          })
         }
 
-        let pad = 0
-        while (pool.length < maxValid) {
-          const fallback =
-            pad % 2 === 0
-              ? loremFallback(`${word}-${pad}`)
-              : picsumFallback(`${word}-${pad}`)
-          if (!pool.includes(fallback)) pool.push(fallback)
-          else pool.push(picsumFallback(`${word}-x${pad}-${stableHash(word)}`))
-          pad++
+        for (const candidate of bingCandidates) {
+          if (pool.length >= maxValid) break
+          if (!pool.includes(candidate)) pool.push(candidate)
+        }
+
+        if (pool.length === 0) {
+          for (const fallback of fallbacks) {
+            if (pool.length >= maxValid) break
+            if (!pool.includes(fallback)) pool.push(fallback)
+          }
         }
 
         poolsByWord.set(key, pool)
@@ -170,26 +177,35 @@ export async function fetchNewsPath(): Promise<NewsPathData> {
     return builder
   }
 
-  async function getImageForWord(word: string): Promise<string> {
+  async function resolveWordImages(word: string): Promise<{ primary: string; alternates: string[] }> {
     const key = wordKey(word)
     const occurrence = wordOccurrence.get(key) ?? 0
     wordOccurrence.set(key, occurrence + 1)
 
     const pool = await ensurePool(word, key)
-    const url = pool[occurrence % pool.length]
-
     const bingCandidates = bingCandidatesByWord.get(key) ?? []
-    if (bingCandidates.includes(url)) bingHits++
+    const primary =
+      pool[occurrence % pool.length] ?? pool[0] ?? bingCandidates[0] ?? loremFallback(word)
 
-    return url
+    if (isBingUrl(primary, bingCandidates)) bingHits++
+
+    const alternates = [
+      ...pool.filter((url) => url !== primary),
+      ...bingCandidates.filter((url) => url !== primary && !pool.includes(url)),
+    ]
+
+    return { primary, alternates }
   }
 
   const headlines = await mapWithConcurrency(headlineTexts, isVercel ? 3 : 2, async (text) => {
     const words = splitHeadlineWords(text)
-    const imageUrls = await mapWithConcurrency(words, isVercel ? 8 : 4, (word) =>
-      getImageForWord(word),
-    )
-    return { text, words, imageUrls }
+    const resolved = await mapWithConcurrency(words, isVercel ? 8 : 4, (word) => resolveWordImages(word))
+    return {
+      text,
+      words,
+      imageUrls: resolved.map((r) => r.primary),
+      imageAlternates: resolved.map((r) => r.alternates),
+    }
   })
 
   return {

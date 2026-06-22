@@ -5,10 +5,18 @@ import { fallbackChainForWord } from '../lib/imageFallback'
 interface KaraokeImageProps {
   src: string
   word: string
+  alternates?: string[]
 }
 
-export const KaraokeImage = React.memo(function KaraokeImage({ src, word }: KaraokeImageProps) {
-  const candidates = React.useMemo(() => fallbackChainForWord(word, src), [word, src])
+export const KaraokeImage = React.memo(function KaraokeImage({
+  src,
+  word,
+  alternates = [],
+}: KaraokeImageProps) {
+  const candidates = React.useMemo(
+    () => fallbackChainForWord(word, src, alternates),
+    [word, src, alternates],
+  )
   const [candidateIdx, setCandidateIdx] = React.useState(0)
 
   React.useEffect(() => {

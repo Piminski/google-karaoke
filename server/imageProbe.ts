@@ -1,32 +1,31 @@
+import { fetchWithTimeout } from './fetchWithTimeout.js'
+
 const PROBE_TIMEOUT_MS = 3500
+const PROBE_TIMEOUT_VERCEL_MS = 2200
 
 export type ImageUrlFilter = (url: string) => boolean
 
-export async function probeImageUrl(url: string): Promise<boolean> {
+export async function probeImageUrl(url: string, timeoutMs = PROBE_TIMEOUT_MS): Promise<boolean> {
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
-
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        Range: 'bytes=0-1023',
-        'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        Accept: 'image/*,*/*;q=0.8',
+    const res = await fetchWithTimeout(
+      url,
+      {
+        method: 'GET',
+        headers: {
+          Range: 'bytes=0-1023',
+          'User-Agent':
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          Accept: 'image/*,*/*;q=0.8',
+        },
       },
-      signal: controller.signal,
-      redirect: 'follow',
-    })
-
-    clearTimeout(timeout)
+      timeoutMs,
+    )
 
     if (!res.ok && res.status !== 206) return false
 
     const contentType = res.headers.get('content-type') ?? ''
     if (contentType.startsWith('image/')) return true
 
-    // Some hosts omit content-type on Range responses — sniff magic bytes.
     const buf = new Uint8Array(await res.arrayBuffer())
     return looksLikeImage(buf)
   } catch {
@@ -88,6 +87,39 @@ export async function buildValidatedPool(
   }
 
   return pool.length > 0 ? pool : fallbacks.filter(Boolean).slice(0, 1)
+}
+
+/** Probe candidates in parallel batches — faster for serverless. */
+export async function pickWorkingUrlsParallel(
+  candidates: string[],
+  options: {
+    maxValid?: number
+    maxProbe?: number
+    timeoutMs?: number
+    shouldSkip?: ImageUrlFilter
+  } = {},
+): Promise<string[]> {
+  const maxValid = options.maxValid ?? 4
+  const maxProbe = options.maxProbe ?? 10
+  const timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT_VERCEL_MS
+  const shouldSkip = options.shouldSkip ?? (() => false)
+
+  const toTry = candidates.filter((url) => url && !shouldSkip(url)).slice(0, maxProbe)
+  const pool: string[] = []
+  const batchSize = 4
+
+  for (let i = 0; i < toTry.length && pool.length < maxValid; i += batchSize) {
+    const batch = toTry.slice(i, i + batchSize)
+    const results = await Promise.all(
+      batch.map(async (url) => ({ url, ok: await probeImageUrl(url, timeoutMs) })),
+    )
+    for (const { url, ok } of results) {
+      if (ok && !pool.includes(url)) pool.push(url)
+      if (pool.length >= maxValid) break
+    }
+  }
+
+  return pool
 }
 
 export async function firstWorkingImageUrl(

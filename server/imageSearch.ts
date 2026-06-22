@@ -235,9 +235,9 @@ export function picsumFallback(word: string): string {
 /** Return several Bing image URLs for a word, best-effort. */
 export async function getBingImageCandidates(
   word: string,
-  options: { fast?: boolean } = {},
+  options: { vercel?: boolean } = {},
 ): Promise<string[]> {
-  const fast = options.fast ?? false
+  const vercel = options.vercel ?? false
   const style = BING_STYLES[stableHash(word) % BING_STYLES.length]
   const suffix = QUERY_SUFFIXES[stableHash(`${word}:suffix`) % QUERY_SUFFIXES.length]
   const queryPasses: { query: string; filter: string }[] = [
@@ -245,16 +245,17 @@ export async function getBingImageCandidates(
     { query: withStockExclusions(`${word} gif`), filter: '+filterui:photo-animatedgif' },
     { query: withStockExclusions(`${word}${suffix}`), filter: bingFilter(style) },
     { query: withStockExclusions(`${word} meme`), filter: '+filterui:photo-photo' },
-  ].slice(0, fast ? 2 : 4)
+  ]
 
-  const targetCount = fast ? 8 : 16
-  const fetchTimeoutMs = fast ? 4500 : 8000
+  const targetCount = vercel ? 14 : 16
+  const fetchTimeoutMs = vercel ? 5000 : 8000
+  const resultCount = vercel ? '28' : '35'
 
   async function runPass({ query, filter }: { query: string; filter: string }): Promise<string[]> {
     const url = new URL('https://www.bing.com/images/async')
     url.searchParams.set('q', query)
     url.searchParams.set('first', '0')
-    url.searchParams.set('count', fast ? '20' : '35')
+    url.searchParams.set('count', resultCount)
     url.searchParams.set('adlt', 'off')
     url.searchParams.set('mkt', 'en-US')
     if (filter) url.searchParams.set('qft', filter)
@@ -282,15 +283,8 @@ export async function getBingImageCandidates(
     }
   }
 
-  if (fast) {
-    const passResults = await Promise.all(queryPasses.map(runPass))
-    for (const urls of passResults) mergeUrls(urls)
-  } else {
-    for (const pass of queryPasses) {
-      if (collected.length >= targetCount) break
-      mergeUrls(await runPass(pass))
-    }
-  }
+  const passResults = await Promise.all(queryPasses.map(runPass))
+  for (const urls of passResults) mergeUrls(urls)
 
   return shuffleCandidates(collected, word)
 }

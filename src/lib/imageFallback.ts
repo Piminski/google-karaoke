@@ -14,9 +14,14 @@ export function picsumFallback(word: string): string {
   return `https://picsum.photos/seed/${stableHash(word)}/800/500`
 }
 
-export function fallbackChainForWord(word: string, primary?: string): string[] {
+export function fallbackChainForWord(
+  word: string,
+  primary?: string,
+  alternates: string[] = [],
+): string[] {
   const chain = [
     primary,
+    ...alternates,
     loremFallback(word),
     picsumFallback(word),
     loremFallback(`${word}-alt`),

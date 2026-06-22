@@ -9,6 +9,7 @@ interface HeadlineEntry {
   text: string
   words: string[]
   imageUrls: string[]
+  imageAlternates: string[][]
 }
 
 interface NewsPathData {
@@ -39,16 +40,22 @@ export default function App() {
   const headline = data?.headlines[headlineIdx]
   const words = headline?.words ?? []
   const imageUrls = headline?.imageUrls ?? []
+  const imageAlternates = headline?.imageAlternates ?? []
   const displaySrc = imageUrls[wordIdx] ?? ''
+  const displayAlternates = imageAlternates[wordIdx] ?? []
   const displayWord = words[wordIdx] ?? ''
 
   React.useEffect(() => {
-    for (const url of imageUrls) {
-      const img = new Image()
-      img.decoding = 'async'
-      img.src = url
+    for (let i = 0; i < imageUrls.length; i++) {
+      const urls = [imageUrls[i], ...(imageAlternates[i] ?? [])].filter(Boolean)
+      for (const url of urls.slice(0, 4)) {
+        const img = new Image()
+        img.decoding = 'async'
+        img.referrerPolicy = 'no-referrer'
+        img.src = url
+      }
     }
-  }, [imageUrls])
+  }, [imageUrls, imageAlternates])
 
   // One timeout per word — React only updates on word boundaries (AutoSubs-style).
   React.useEffect(() => {
@@ -102,7 +109,7 @@ export default function App() {
   return (
     <div className="frame-shell">
       <div className="frame">
-        <KaraokeImage src={displaySrc} word={displayWord} />
+        <KaraokeImage src={displaySrc} word={displayWord} alternates={displayAlternates} />
         <div className="karaoke-caption">
           <KaraokeText words={words} activeWordIndex={wordIdx} />
         </div>
