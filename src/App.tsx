@@ -3,6 +3,8 @@ import * as React from 'react'
 
 import { KaraokeImage } from './components/KaraokeImage'
 import { KaraokeText } from './components/KaraokeText'
+import { AppFrame } from './components/AppFrame'
+import { LoadingHeadlines } from './components/LoadingHeadlines'
 import { karaokeStyle } from './karaokeStyle'
 
 interface HeadlineEntry {
@@ -90,45 +92,39 @@ export default function App() {
 
   if (isError && !data) {
     return (
-      <div className="frame-shell">
-        <div className="frame flex items-center justify-center px-6">
-          <p className="text-center text-sm text-white/70">
+      <AppFrame>
+        <div className="flex flex-1 items-center justify-center px-6">
+          <p className="site-chrome site-status text-center">
             Couldn&apos;t load headlines.
             {error instanceof Error ? ` ${error.message}` : ''}
           </p>
         </div>
-      </div>
+      </AppFrame>
     )
   }
 
   if ((isLoading || isFetching) && !data) {
     return (
-      <div className="frame-shell">
-        <div className="frame flex items-center justify-center">
-          <p className="animate-pulse text-sm text-white/50">Loading headlines…</p>
-        </div>
-      </div>
+      <AppFrame>
+        <LoadingHeadlines />
+      </AppFrame>
     )
   }
 
   if (!headline || !displaySrc) {
     return (
-      <div className="frame-shell">
-        <div className="frame flex items-center justify-center">
-          <p className="animate-pulse text-sm text-white/50">Loading headlines…</p>
-        </div>
-      </div>
+      <AppFrame>
+        <LoadingHeadlines />
+      </AppFrame>
     )
   }
 
   return (
-    <div className="frame-shell">
-      <div className="frame">
-        <KaraokeImage src={displaySrc} word={displayWord} alternates={displayAlternates} />
-        <div className="karaoke-caption">
-          <KaraokeText words={words} activeWordIndex={wordIdx} />
-        </div>
+    <AppFrame>
+      <KaraokeImage src={displaySrc} word={displayWord} alternates={displayAlternates} />
+      <div className="karaoke-caption">
+        <KaraokeText words={words} activeWordIndex={wordIdx} />
       </div>
-    </div>
+    </AppFrame>
   )
 }

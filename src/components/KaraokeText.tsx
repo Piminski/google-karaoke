@@ -1,6 +1,6 @@
 import React from 'react'
 
-import { karaokeStyle } from '../karaokeStyle'
+import { buildRoundedTextOutline, karaokeStyle } from '../karaokeStyle'
 
 interface KaraokeTextProps {
   words: string[]
@@ -21,11 +21,11 @@ const CSS = `
     display: inline-block;
     transform-origin: center bottom;
     will-change: transform, opacity;
-    paint-order: stroke fill;
+    -webkit-font-smoothing: antialiased;
   }
   .karaoke-word--active {
     animation: karaoke-pop-in var(--pop-duration, 200ms) ease-out;
-    transition: -webkit-text-stroke 120ms ease-out;
+    transition: text-shadow 120ms ease-out;
   }
   @keyframes karaoke-pop-in {
     from {
@@ -92,9 +92,12 @@ export const KaraokeText = React.memo(function KaraokeText({
 
   const wordStyle = (active: boolean): React.CSSProperties => ({
     color: karaokeStyle.textColor,
-    WebkitTextStroke: active
-      ? `${karaokeStyle.activeOutlineWidthPx}px ${karaokeStyle.activeOutlineColor}`
-      : `${karaokeStyle.outlineWidthPx}px ${karaokeStyle.outlineColor}`,
+    textShadow: active
+      ? buildRoundedTextOutline(
+          karaokeStyle.activeOutlineWidthPx,
+          karaokeStyle.activeOutlineColor,
+        )
+      : buildRoundedTextOutline(karaokeStyle.outlineWidthPx, karaokeStyle.outlineColor),
   })
 
   return (

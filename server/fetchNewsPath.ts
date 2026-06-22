@@ -8,6 +8,7 @@ import {
 import { pickWorkingUrlsParallel } from './imageProbe.js'
 import { tokenizeHeadlineForSearch } from './headlineTokens.js'
 import { fetchWithTimeout } from './fetchWithTimeout.js'
+import { NEWS_SOURCE_URL } from '../newsSource.js'
 
 export interface HeadlineEntry {
   text: string
@@ -78,7 +79,7 @@ function isBingUrl(url: string, bingCandidates: string[]): boolean {
 
 export async function fetchNewsPath(): Promise<NewsPathData> {
   const isVercel = Boolean(process.env.VERCEL)
-  const rssUrl = 'https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en'
+  const rssUrl = NEWS_SOURCE_URL
   const rssRes = await fetchWithTimeout(
     rssUrl,
     {
