@@ -1,4 +1,4 @@
-import { fetchNewsPath } from '../server/fetchNewsPath.ts'
+import { fetchNewsPath } from '../server/fetchNewsPath'
 
 export const config = {
   maxDuration: 60,

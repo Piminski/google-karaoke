@@ -3,7 +3,8 @@
   "outputDirectory": "dist",
   "functions": {
     "api/news-path.ts": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "includeFiles": "server/**"
     }
   },
   "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }]

@@ -5,8 +5,8 @@ import {
   loremFallback,
   picsumFallback,
   stableHash,
-} from './imageSearch.ts'
-import { buildValidatedPool } from './imageProbe.ts'
+} from './imageSearch'
+import { buildValidatedPool } from './imageProbe'
 
 export interface HeadlineEntry {
   text: string

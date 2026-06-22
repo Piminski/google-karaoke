@@ -3,7 +3,7 @@ import express from 'express'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
-import { fetchNewsPath } from './fetchNewsPath.ts'
+import { fetchNewsPath } from './fetchNewsPath'
 
 loadEnv()
 
